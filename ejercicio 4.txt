@@ -1,0 +1,134 @@
+import java.io.*;
+import java.net.*;
+import java.nio.file.*;
+import java.nio.file.attribute.*;
+import java.text.*;
+import java.util.*;
+import java.util.concurrent.*;
+import com.sun.net.httpserver.*;
+
+public class DomainProcessor {
+    private static final String INPUT_FILE = "/Users/VALENTINA/Desktop/Dominios/dominios.txt";
+    private static final String OUTPUT_FILE = "/Users/VALENTINA/Desktop/Dominios/dominios.csv";
+    private static final String SERVER_ADDRESS = "localhost";
+    private static final int SERVER_PORT = 8080;
+
+    public static void main(String[] args) throws Exception {
+        
+        initializeCsvFile();
+
+        
+        HttpServer server = HttpServer.create(new InetSocketAddress(SERVER_PORT), 0);
+        server.createContext("/", new HttpHandler() {
+            @Override
+            public void handle(HttpExchange exchange) throws IOException {
+                String response = "Microservicio de Procesamiento de Dominios en Java";
+                exchange.sendResponseHeaders(200, response.getBytes().length);
+                OutputStream os = exchange.getResponseBody();
+                os.write(response.getBytes());
+                os.close();
+            }
+        });
+        server.start();
+        System.out.println("Servidor HTTP corriendo en http://" + SERVER_ADDRESS + ":" + SERVER_PORT);
+
+        
+        monitorDomainFile();
+
+        
+        processDomainsFromFile();
+    }
+
+    
+    private static void initializeCsvFile() {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(OUTPUT_FILE, true))) {
+            
+            if (new File(OUTPUT_FILE).length() == 0) {
+                writer.write("ID,IP,Dominio,Fecha,Hora");
+                writer.newLine();
+            }
+        } catch (IOException e) {
+            System.err.println("Error al inicializar el archivo CSV: " + e.getMessage());
+        }
+    }
+
+    
+    private static void monitorDomainFile() {
+        Path path = Paths.get(INPUT_FILE);
+        try (WatchService watchService = FileSystems.getDefault().newWatchService()) {
+            path.getParent().register(watchService, StandardWatchEventKinds.ENTRY_MODIFY);
+            System.out.println("Monitoreando el archivo " + INPUT_FILE + " en busca de cambios...");
+            
+            while (true) {
+                WatchKey key = watchService.take();
+                for (WatchEvent<?> event : key.pollEvents()) {
+                    if (event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
+                        
+                        processDomainsFromFile();
+                    }
+                }
+                key.reset();
+            }
+        } catch (IOException | InterruptedException e) {
+            System.err.println("Error al monitorear el archivo: " + e.getMessage());
+        }
+    }
+
+    
+    private static void processDomainsFromFile() {
+        Set<String> processedDomains = new HashSet<>();
+        List<String> domains = readDomainsFromFile();
+        
+        for (String domain : domains) {
+            if (processedDomains.contains(domain)) {
+                continue;  
+            }
+            processedDomains.add(domain);
+            String ip = resolveDomainToIp(domain);
+            if (ip != null) {
+                writeToCsv(domain, ip);
+            }
+        }
+    }
+
+    
+    private static List<String> readDomainsFromFile() {
+        List<String> domains = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new FileReader(INPUT_FILE))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.trim().isEmpty()) {
+                    domains.add(line.trim());
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error al leer el archivo de dominios: " + e.getMessage());
+        }
+        return domains;
+    }
+
+    
+    private static String resolveDomainToIp(String domain) {
+        try {
+            InetAddress inetAddress = InetAddress.getByName(domain);
+            return inetAddress.getHostAddress();
+        } catch (UnknownHostException e) {
+            System.err.println("No se pudo resolver el dominio: " + domain);
+            return null;
+        }
+    }
+
+    
+    private static void writeToCsv(String domain, String ip) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(OUTPUT_FILE, true))) {
+            String id = String.valueOf(new Date().getTime());  
+            String date = new SimpleDateFormat("yyyy-MM-dd").format(new Date());
+            String time = new SimpleDateFormat("HH:mm:ss").format(new Date());
+
+            writer.write(String.format("%s,%s,%s,%s,%s", id, ip, domain, date, time));
+            writer.newLine();
+        } catch (IOException e) {
+            System.err.println("Error al escribir en el archivo CSV: " + e.getMessage());
+        }
+    }
+}
